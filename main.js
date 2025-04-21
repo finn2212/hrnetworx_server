@@ -63,24 +63,21 @@ const loginPassword = "vFS8c^&a7F#b";
   // Screenshot nach dem (ggf. automatischen) Login
   await takeScreenshot(page, "01_after_login");
 
-  // 3. „Webinar beitreten“-Button anklicken (ohne waitForFunction)
+  // 3. „Webinar beitreten“-Button anklicken
   if (!manualClick) {
     try {
       console.log("[MAIN] Warte 5 Sekunden, damit Elemente Zeit haben zu laden...");
       await new Promise((resolve) => setTimeout(resolve, 5000)); // 5s Pause
 
-      // Shadow-Host #streamingPage_webinargeek suchen
+      // Shadow-Host #streamingPage_webinargeek
       const streamingHost = await page.$("#streamingPage_webinargeek");
       if (!streamingHost) {
         throw new Error("Shadow-Host #streamingPage_webinargeek nicht gefunden!");
       }
-
       // ShadowRoot abrufen
-      const streamingShadow = await streamingHost.evaluateHandle(
-        (el) => el.shadowRoot
-      );
+      const streamingShadow = await streamingHost.evaluateHandle(el => el.shadowRoot);
 
-      // malong-root im Shadow-DOM
+      // malong-root
       const malongRoot = await streamingShadow.$("#malong-root");
       if (!malongRoot) {
         throw new Error("Konnte #malong-root im Shadow DOM nicht finden!");
@@ -94,11 +91,25 @@ const loginPassword = "vFS8c^&a7F#b";
         throw new Error("Konnte 'Webinar beitreten'-Button nicht finden!");
       }
 
-      // Klick ausführen
+      // Klick „Webinar beitreten“
       await webinarJoinButton.click();
       console.log(">>> Automatisch auf 'Webinar beitreten' geklickt!");
+
+      // 4. Kurz warten und dann auf den "Alle"-Tab klicken
+      console.log("[MAIN] Warte 3s, dann klicke auf den 'Alle'-Tab ...");
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // Gleicher Shadow-DOM (streamingShadow, malongRoot)
+      // => Button mit aria-label="Bedienfeld Alle öffnen" oder #sidebar-button-attendeeList
+      const allTabButton = await malongRoot.$('#sidebar-button-attendeeList');
+      if (!allTabButton) {
+        throw new Error("Konnte den 'Alle'-Tab-Button nicht finden!");
+      }
+
+      await allTabButton.click();
+      console.log(">>> Automatisch auf 'Alle' (Teilnehmerliste) geklickt!");
     } catch (err) {
-      console.error("[MAIN] Fehler beim Klick auf 'Webinar beitreten':", err);
+      console.error("[MAIN] Fehler beim Klick auf 'Webinar beitreten' / 'Alle':", err);
     }
   } else {
     // Manuelles Klicken
@@ -109,7 +120,7 @@ const loginPassword = "vFS8c^&a7F#b";
   // Optional: Screenshot
   await takeScreenshot(page, "02_join_attempt");
 
-  // 4. Warte auf das Shadow-Element #streamingPage_webinargeek (für Teilnehmer-Überwachung)
+  // 5. Warte auf das Shadow-Element #streamingPage_webinargeek (für Teilnehmer-Überwachung)
   try {
     console.log("[MAIN] Warte nochmal 5s, bevor wir mit Monitoring starten...");
     await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -127,7 +138,7 @@ const loginPassword = "vFS8c^&a7F#b";
     // return;
   }
 
-  // 5. Endlos-Schleife: Teilnehmerliste auslesen
+  // 6. Endlos-Schleife: Teilnehmerliste auslesen
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
     const attendees = await getAttendeeList(page);
