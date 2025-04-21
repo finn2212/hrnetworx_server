@@ -1,9 +1,9 @@
 const fs = require("fs");
 const path = require("path");
+const puppeteer = require("puppeteer");
 
+// Ordner für Screenshots
 const screenshotsDir = path.join(__dirname, "screenshots");
-
-// Erstelle den Screenshot-Ordner, falls er nicht existiert, oder lösche alle vorhandenen Dateien darin
 if (!fs.existsSync(screenshotsDir)) {
   fs.mkdirSync(screenshotsDir);
 } else {
@@ -12,16 +12,59 @@ if (!fs.existsSync(screenshotsDir)) {
   });
 }
 
-// Hilfsfunktion, um Screenshots mit einem bestimmten Namen zu speichern
+// Hilfsfunktion für Screenshots
 async function takeScreenshot(page, stepName) {
   await page.screenshot({ path: `screenshots/${stepName}.png` });
 }
 
-const puppeteer = require("puppeteer");
-
-// Setze manualClick auf true, falls du den Klick manuell ausführen möchtest,
-// ansonsten wird automatisch auf den "Bühne betreten"-Button geklickt.
+// true = manuell klicken; false = automatisch klicken
 const manualClick = true;
+
+// --- Funktion, um Attendee-Liste abzufragen ---
+async function getAttendeeList(page) {
+  try {
+    // 1. Host-Element aus dem Shadow DOM holen
+    const hostHandle = await page.$("#streamingPage_webinargeek");
+    if (!hostHandle) {
+      throw new Error("Shadow-Host #streamingPage_webinargeek nicht gefunden!");
+    }
+
+    // 2. ShadowRoot abrufen
+    const shadowRootHandle = await hostHandle.evaluateHandle(
+      (host) => host.shadowRoot
+    );
+
+    // 3. Im Shadow-Root die UL mit aria-label="Zuschauer" suchen
+    const attendeeListHandle = await shadowRootHandle.$('ul[aria-label="Zuschauer"]');
+    if (!attendeeListHandle) {
+      throw new Error("Attendee-Liste im Shadow DOM nicht gefunden!");
+    }
+
+    // 4. Daten aus jedem LI-Element extrahieren
+    const attendees = await attendeeListHandle.$$eval("li", (items) => {
+      return items.reduce((acc, item) => {
+        // Name aus aria-label holen
+        const name = item.getAttribute("aria-label")?.trim();
+        // Online-Status (z. B. "online"/"offline") via data-online
+        const onlineDiv = item.querySelector("div[data-online]");
+        const onlineStatus = onlineDiv
+          ? onlineDiv.getAttribute("data-online")
+          : null;
+
+        // Nur hinzufügen, wenn Name existiert
+        if (name) {
+          acc.push({ name, onlineStatus });
+        }
+        return acc;
+      }, []);
+    });
+
+    return attendees;
+  } catch (err) {
+    console.error("Fehler beim Auslesen der Attendee-Liste:", err);
+    return [];
+  }
+}
 
 (async () => {
   const browser = await puppeteer.launch({
@@ -30,31 +73,29 @@ const manualClick = true;
   });
   const page = await browser.newPage();
 
-  // Setze den Viewport auf HD-Größe
+  // Viewport einstellen
   await page.setViewport({ width: 1920, height: 1080 });
 
-  // Überschreibe Berechtigungen für Kamera und Mikrofon
-  await browser
-    .defaultBrowserContext()
-    .overridePermissions("https://hrnetworx.webinargeek.com", [
-      "camera",
-      "microphone",
-    ]);
+  // Kamera- und Mikrofonrechte für die passende Domain setzen
+  await browser.defaultBrowserContext().overridePermissions(
+    "https://hrnetworx.webinargeek.com",
+    ["camera", "microphone"]
+  );
 
+  // Seite öffnen
   await page.goto(
     "https://hrnetworx.webinargeek.com/webinar/admin/NKvetw7N0Ht5WvEZtcpxGlSz2Vj1nvLn4-_c2dGjZbKr732I-du8jv3lYBTjQ0ns9x3fFrVGIzz6MN5RCKtGbA/"
   );
 
-  // Screenshot nach dem Laden der Seite
+  // Erstes Screenshot
   await takeScreenshot(page, "01_page_loaded");
+  // Kurze Wartezeit (damit Inhalt geladen wird)
+  await new Promise((resolve) => setTimeout(resolve, 5000));
 
-  // Warte kurz, damit dynamischer Content geladen werden kann
-  await new Promise((resolve) => setTimeout(resolve, 10000)); // 5 Sekunden warten (Promise-basierter Timeout)
-
-  // Screenshot vor dem Join-Versuch
+  // Vor dem Join klicken
   await takeScreenshot(page, "02_before_join");
 
-  // Join Button Handling: entweder automatischer Klick oder manuelle Intervention
+  // Button "Bühne betreten" entweder automatisch oder manuell
   if (!manualClick) {
     try {
       await page.waitForSelector('button[aria-label*="Bühne betreten"]', {
@@ -68,83 +109,28 @@ const manualClick = true;
     }
   } else {
     console.log(
-      "Manueller Klick: Bitte klicke den 'Bühne betreten'-Button im Browser."
+      "Manueller Klick: Bitte klicke jetzt den 'Bühne betreten'-Button im Browser."
     );
-    // Warte 10 Sekunden, damit du manuell klicken kannst
     await new Promise((resolve) => setTimeout(resolve, 10000));
   }
 
-  // Screenshot nach dem Join-Versuch
   await takeScreenshot(page, "03_after_join");
-
-  // Weitere Debug-Screenshot
   await takeScreenshot(page, "04_debug");
 
-  // Warten auf das Element mit der Teilnehmerliste im Shadow-DOM
-  try {
-    // 1. Warte auf das Host-Element, das den Shadow DOM enthält
-    const hostHandle = await page.waitForSelector(
-      "#streamingPage_webinargeek",
-      { timeout: 20000 }
-    );
-    if (!hostHandle) {
-      throw new Error("Shadow-Host #streamingPage_webinargeek nicht gefunden!");
-    }
+  // Warte, bis der Shadow-DOM geladen ist (mind. 1x)
+  await page.waitForSelector("#streamingPage_webinargeek", { timeout: 20000 });
+  console.log("Shadow-Host gefunden. Starte Status-Überwachung ...");
 
-    // 2. Shadow-Root abrufen
-    const shadowRootHandle = await hostHandle.evaluateHandle(
-      (host) => host.shadowRoot
-    );
+  // Endlos-Schleife (bzw. bis manuell abgebrochen)
+  while (true) {
+    // Alle 5s aktuelle Liste abrufen
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
-    // 3. Innerhalb des Shadow-Roots nach dem ul suchen
-    const attendeeListHandle = await shadowRootHandle.$(
-      'ul[aria-label="Zuschauer"]'
-    );
-    if (!attendeeListHandle) {
-      throw new Error("Attendee-Liste im Shadow DOM nicht gefunden!");
-    }
-
-    // 4. Daten aus der Liste extrahieren
-    // 4. Daten aus der Liste extrahieren
-    const attendees = await attendeeListHandle.$$eval("li", (items) => {
-      return items.reduce((acc, item) => {
-        // 1. Namen aus dem aria-label holen
-        const name = item.getAttribute("aria-label")?.trim();
-
-        // 2. Online-Status ermitteln:
-        //    Wir holen das div[data-online], um den Wert (z. B. "online"/"offline") auszulesen
-        const onlineDiv = item.querySelector("div[data-online]");
-        // Der Wert befindet sich im data-Attribut "data-online"
-        const onlineStatus = onlineDiv
-          ? onlineDiv.getAttribute("data-online")
-          : null;
-
-        // Optional: Wenn du den Text-Inhalt ("Online"/"Offline") benötigst, könntest du so
-        // den Span oder das Div auslesen:
-        // const onlineText = onlineDiv ? onlineDiv.textContent.trim() : null;
-
-        // 3. Nur hinzufügen, wenn ein Name vorhanden ist
-        if (name) {
-          acc.push({ name, onlineStatus });
-        }
-
-        return acc;
-      }, []);
-    });
-
-    console.log("Attendee List:", attendees);
-  } catch (err) {
-    console.error(
-      "Fehler beim Auslesen der Attendee-Liste im Shadow DOM:",
-      err
-    );
-    await browser.close();
-    return;
+    const attendees = await getAttendeeList(page);
+    console.log("Aktuelle Attendee-Liste:", attendees);
   }
 
-  // Screenshot, wenn die Teilnehmerliste geladen wurde
-  await takeScreenshot(page, "05_attendee_list_loaded");
-
-  // Extrahiere die AttendeeList-Daten
-  await browser.close();
+  // -> wird in diesem Beispiel nie aufgerufen,
+  //    weil die while-Schleife unendlich läuft:
+  // await browser.close();
 })();
