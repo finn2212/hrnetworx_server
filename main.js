@@ -16,9 +16,6 @@ if (!fs.existsSync(screenshotsDir)) {
     fs.unlinkSync(path.join(screenshotsDir, file));
   });
 }
-async function takeScreenshot(page, stepName) {
-  await page.screenshot({ path: `screenshots/${stepName}.png` });
-}
 
 // Konfiguration
 const adminUrl =
@@ -60,8 +57,6 @@ const loginPassword = "vFS8c^&a7F#b";
     console.log("[MAIN] → Offenbar schon eingeloggt / keine Login-Weiterleitung");
   }
 
-  // Screenshot nach dem (ggf. automatischen) Login
-  await takeScreenshot(page, "01_after_login");
 
   // 3. „Webinar beitreten“-Button anklicken
   if (!manualClick) {
@@ -117,8 +112,6 @@ const loginPassword = "vFS8c^&a7F#b";
     await new Promise((resolve) => setTimeout(resolve, 10000));
   }
 
-  // Optional: Screenshot
-  await takeScreenshot(page, "02_join_attempt");
 
   // 5. Warte auf das Shadow-Element #streamingPage_webinargeek (für Teilnehmer-Überwachung)
   try {
