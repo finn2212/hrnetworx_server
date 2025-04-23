@@ -3,12 +3,31 @@ const express = require('express');
 const cors = require('cors');
 const chromium = require('@sparticuz/chromium');
 const puppeteerCore = require('puppeteer-core');
-const puppeteer = require('puppeteer'); // full Puppeteer for local development
+const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
 
 const { doLogin } = require('./login');
 const { getAttendeeList } = require('./attendeeList');
+
+// Helper to retry puppeteer-core.launch on ETXTBSY errors
+async function safeLaunch(options, retries = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await puppeteerCore.launch(options);
+    } catch (err) {
+      lastError = err;
+      if (err.code === 'ETXTBSY' && attempt < retries) {
+        console.warn(`[LOG] ETXTBSY on launch, retrying attempt ${attempt}...`);
+        await new Promise(r => setTimeout(r, attempt * 1000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
 
 // SSE setup for frontend streaming
 const sseClients = [];
@@ -17,6 +36,7 @@ function sendEvent(event) {
     client.write(`data: ${JSON.stringify(event)}\n\n`)
   );
 }
+
 // Override console.log to send events
 const originalLog = console.log;
 console.log = (...args) => {
@@ -26,8 +46,7 @@ console.log = (...args) => {
 
 const isLocal = process.env.NODE_ENV !== 'production';
 
-const adminUrl =
-  'https://hrnetworx.webinargeek.com/webinar/admin/RP3XFDoqAnkSSeaCVcFLV1XGHiXBthxS9bh0OyqNjZgXEg_Qz0dqYfZwI9jWm0Ad9W6OSSiN4o9V34-xfzHCwQ/';
+const adminUrl = 'https://hrnetworx.webinargeek.com/webinar/admin/RP3XFDoqAnkSSeaCVcFLV1XGHiXBthxS9bh0OyqNjZgXEg_Qz0dqYfZwI9jWm0Ad9W6OSSiN4o9V34-xfzHCwQ/';
 const loginEmail = 'events@hrnetworx.de';
 const loginPassword = 'vFS8c^&a7F#b';
 
@@ -47,40 +66,30 @@ async function startLoggingProcess() {
       headless: false,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
-    console.log('[LOG] Browser launched (full puppeteer).');
+    console.log('[LOG] Browser launched (full Puppeteer).');
   } else {
-    console.log('[LOG] Serverless mode: launching Chromium...');
+    console.log('[LOG] Production mode: launching serverless Chromium...');
     let executablePath;
     try {
       executablePath = await chromium.executablePath();
     } catch {
-      throw new Error(
-        'Failed to get chromium executable path in production'
-      );
+      throw new Error('Failed to get Chromium executable path in production');
     }
-    browser = await puppeteerCore.launch({
+    browser = await safeLaunch({
       executablePath,
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
       headless: chromium.headless,
     });
-    console.log(
-      '[LOG] Browser launched with executablePath:',
-      executablePath
-    );
+    console.log('[LOG] Browser launched with executablePath:', executablePath);
   }
 
   page = await browser.newPage();
   await page.setViewport({ width: 1920, height: 1080 });
 
-  // Override permissions locally (camera & microphone)
   if (isLocal) {
-    console.log(
-      '[LOG] Overriding camera & microphone permissions for local mode...'
-    );
-    await browser
-      .defaultBrowserContext()
-      .overridePermissions(adminUrl, ['camera', 'microphone']);
+    console.log('[LOG] Overriding camera & microphone permissions for local mode...');
+    await browser.defaultBrowserContext().overridePermissions(adminUrl, ['camera', 'microphone']);
   }
 
   console.log('[LOG] Navigating to admin URL...');
@@ -96,44 +105,32 @@ async function startLoggingProcess() {
   }
 
   console.log('[LOG] Waiting for streaming host element...');
-  await page.waitForSelector('#streamingPage_webinargeek', {
-    timeout: 15000,
-  });
+  await page.waitForSelector('#streamingPage_webinargeek', { timeout: 15000 });
   const streamingHost = await page.$('#streamingPage_webinargeek');
-  const streamingShadow = await streamingHost.evaluateHandle(
-    (el) => el.shadowRoot
-  );
+  const streamingShadow = await streamingHost.evaluateHandle(el => el.shadowRoot);
   const malongRoot = await streamingShadow.$('#malong-root');
 
   console.log('[LOG] Waiting for join button...');
-  await page.waitForFunction(
-    () => {
-      const host = document.querySelector('#streamingPage_webinargeek');
-      const root = host && host.shadowRoot;
-      const btn = root && root.querySelector('button[data-button-type="tertiary"]');
-      return btn && !btn.hasAttribute('disabled');
-    },
-    { timeout: 15000 }
-  );
+  await page.waitForFunction(() => {
+    const host = document.querySelector('#streamingPage_webinargeek');
+    const root = host && host.shadowRoot;
+    const btn = root && root.querySelector('button[data-button-type="tertiary"]');
+    return btn && !btn.hasAttribute('disabled');
+  }, { timeout: 15000 });
 
-  const joinBtn = await malongRoot.$(
-    'button[data-button-type="tertiary"]'
-  );
+  const joinBtn = await malongRoot.$('button[data-button-type="tertiary"]');
   console.log('[LOG] Clicking join button...');
   await joinBtn.click();
   console.log('[LOG] Clicked join button.');
-  await new Promise((r) => setTimeout(r, 3000));
+  await new Promise(r => setTimeout(r, 3000));
 
   console.log('[LOG] Waiting for attendee list tab...');
-  await page.waitForFunction(
-    () => {
-      const host = document.querySelector('#streamingPage_webinargeek');
-      const root = host && host.shadowRoot;
-      const malong = root && root.querySelector('#malong-root');
-      return malong && malong.querySelector('#sidebar-button-attendeeList');
-    },
-    { timeout: 15000 }
-  );
+  await page.waitForFunction(() => {
+    const host = document.querySelector('#streamingPage_webinargeek');
+    const root = host && host.shadowRoot;
+    const malong = root && root.querySelector('#malong-root');
+    return malong && malong.querySelector('#sidebar-button-attendeeList');
+  }, { timeout: 15000 });
 
   const allTab = await malongRoot.$('#sidebar-button-attendeeList');
   if (allTab) {
@@ -141,18 +138,15 @@ async function startLoggingProcess() {
     await allTab.click();
     console.log('[LOG] Attendee list opened.');
   } else {
-    console.error(
-      '[LOG] Could not find "Alle" tab button at all!'
-    );
+    console.error('[LOG] Could not find attendee list tab button!');
   }
 
-  // Monitoring loop
   while (isLogging) {
     console.log('[LOG] Monitoring iteration...');
-    await new Promise((r) => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 5000));
     try {
       const attendees = await getAttendeeList(page);
-      console.log('Current attendees:', attendees);
+      console.log('[LOG] Current attendees:', attendees);
     } catch (err) {
       console.error('[LOG] Error reading attendees:', err);
     }
@@ -174,22 +168,14 @@ async function stopLoggingProcess() {
 }
 
 const app = express();
-
-// CORS configuration
-app.use(
-  cors({
-    origin: [
-      'http://localhost:3000',
-      'https://hrnetworx-frontend.vercel.app',
-    ],
-    methods: ['GET', 'POST', 'OPTIONS'],
-    credentials: true,
-  })
-);
-// Enable preflight for all routes
+app.use(cors({
+  origin: ['http://localhost:3000', 'https://hrnetworx-frontend.vercel.app'],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+}));
 app.options('*', cors());
 
-// SSE endpoint for streaming log messages
+// SSE endpoint
 app.get('/api/webinars/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -202,15 +188,11 @@ app.get('/api/webinars/stream', (req, res) => {
   });
 });
 
-app.get('/', (req, res) => {
-  res.send('✅ Server is running');
-});
-
+app.get('/', (req, res) => res.send('✅ Server is running'));
 app.get('/api/webinars/startlogging', (req, res) => {
-  startLoggingProcess().catch((err) => console.error(err));
+  startLoggingProcess().catch(err => console.error(err));
   res.status(200).send('Logging started');
 });
-
 app.get('/api/webinars/stoplogging', async (req, res) => {
   try {
     await stopLoggingProcess();
@@ -222,6 +204,4 @@ app.get('/api/webinars/stoplogging', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () =>
-  console.log(`Server listening on port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
