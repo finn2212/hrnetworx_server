@@ -1,7 +1,8 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
+const chromium = require('chrome-aws-lambda');
+const puppeteer = require('puppeteer-core');
 const { doLogin } = require('./login');
 const { getAttendeeList } = require('./attendeeList');
 
@@ -19,18 +20,52 @@ async function startLoggingProcess() {
   isLogging = true;
 
   console.log('[LOG] Launching browser...');
-  browser = await puppeteer.launch({
-    headless: true,                // auf Server meist headless
-    args: ['--no-sandbox','--disable-setuid-sandbox'],
-  });
-  console.log('[LOG] Browser launched.');
+  // Determine executablePath (Lambda vs. local fallback)
+  let executablePath;
+  let isFallback = false;
+  try {
+    executablePath = await chromium.executablePath;
+  } catch {
+    isFallback = true;
+  }
+  if (!executablePath) {
+    isFallback = true;
+    if (process.platform === 'darwin') {
+      executablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    } else if (process.platform === 'linux') {
+      executablePath = '/usr/bin/google-chrome-stable';
+    } else {
+      throw new Error('No Chromium executable found for this platform');
+    }
+    console.log('[LOG] Fallback executablePath:', executablePath);
+  }
+
+  const launchOptions = isFallback
+    ? {
+        executablePath,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        headless: false,
+      }
+    : {
+        executablePath,
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        headless: chromium.headless,
+      };
+
+  browser = await puppeteer.launch(launchOptions);
+  console.log('[LOG] Browser launched with executablePath:', executablePath);
   page = await browser.newPage();
   await page.setViewport({ width: 1920, height: 1080 });
 
+  // Override permissions locally (camera & microphone)
+  if (isFallback) {
+    console.log('[LOG] Overriding camera & microphone permissions for local mode...');
+    await browser.defaultBrowserContext().overridePermissions(adminUrl, ['camera', 'microphone']);
+  }
+
   // Kamera/Mikro lassen sich bei headless ggf. weglassen
-  await browser
-    .defaultBrowserContext()
-    .overridePermissions(adminUrl, ['camera','microphone']);
+  // Permissions override not needed in Lambda/headless environment
 
   console.log('[LOG] Navigating to admin URL...');
   // 1. Admin-Seite aufrufen
