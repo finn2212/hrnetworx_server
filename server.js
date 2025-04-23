@@ -81,6 +81,10 @@ async function startLoggingProcess() {
 
   page = await browser.newPage();
   await page.setViewport({ width: 1920, height: 1080 });
+  // Set timeouts for navigation and operations
+  page.setDefaultNavigationTimeout(30000);
+  page.setDefaultTimeout(30000);
+  console.log('[LOG] Default timeouts set to 30s');
 
   if (isLocal) {
     console.log('[LOG] Overriding camera & microphone permissions for local mode...');
@@ -88,8 +92,13 @@ async function startLoggingProcess() {
   }
 
   console.log('[LOG] Navigating to admin URL...');
-  await page.goto(adminUrl, { waitUntil: 'networkidle2' });
-  console.log('[LOG] Page loaded:', page.url());
+  try {
+    await page.goto(adminUrl, { waitUntil: 'networkidle2' });
+    console.log('[LOG] Page loaded:', page.url());
+  } catch (err) {
+    console.error('[LOG] Error during page.goto:', err);
+    return;
+  }
 
   console.log('[LOG] Checking if login is required...');
   if (page.url().includes('users/sign_in')) {
@@ -100,7 +109,13 @@ async function startLoggingProcess() {
   }
 
   console.log('[LOG] Waiting for streaming host element...');
-  await page.waitForSelector('#streamingPage_webinargeek', { timeout: 15000 });
+  try {
+    await page.waitForSelector('#streamingPage_webinargeek', { timeout: 15000 });
+    console.log('[LOG] Streaming host element found');
+  } catch (err) {
+    console.error('[LOG] Error waiting for streaming host:', err);
+    return;
+  }
   const streamingHost = await page.$('#streamingPage_webinargeek');
   const streamingShadow = await streamingHost.evaluateHandle(el => el.shadowRoot);
   const malongRoot = await streamingShadow.$('#malong-root');
