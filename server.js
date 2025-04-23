@@ -24,7 +24,7 @@ async function startLoggingProcess() {
   let executablePath;
   let isFallback = false;
   try {
-    executablePath = await chromium.executablePath;
+    executablePath = await chromium.executablePath();
   } catch {
     isFallback = true;
   }
