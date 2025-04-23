@@ -95,6 +95,15 @@ async function startLoggingProcess() {
   try {
     await page.goto(adminUrl, { waitUntil: 'networkidle2' });
     console.log('[LOG] Page loaded:', page.url());
+    if (!isLocal) {
+      try {
+        const screenshotPath = `/tmp/screenshot_goto_${Date.now()}.png`;
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        console.log(`[LOG] Saved screenshot after goto: ${screenshotPath}`);
+      } catch (err) {
+        console.error('[LOG] Error taking screenshot after goto:', err);
+      }
+    }
   } catch (err) {
     console.error('[LOG] Error during page.goto:', err);
     return;
@@ -112,6 +121,15 @@ async function startLoggingProcess() {
   try {
     await page.waitForSelector('#streamingPage_webinargeek', { timeout: 15000 });
     console.log('[LOG] Streaming host element found');
+    if (!isLocal) {
+      try {
+        const screenshotPath = `/tmp/screenshot_host_${Date.now()}.png`;
+        await page.screenshot({ path: screenshotPath, fullPage: false });
+        console.log(`[LOG] Saved screenshot of streaming host: ${screenshotPath}`);
+      } catch (err) {
+        console.error('[LOG] Error taking screenshot of streaming host:', err);
+      }
+    }
   } catch (err) {
     console.error('[LOG] Error waiting for streaming host:', err);
     return;
