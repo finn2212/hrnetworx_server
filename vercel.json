@@ -1,5 +1,0 @@
-{
-    "routes": [
-      { "src": "https://git.new/pathToRegexpError", "dest": "server.js" }
-    ]
-  }
