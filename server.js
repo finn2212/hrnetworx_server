@@ -29,18 +29,13 @@ async function safeLaunch(options, retries = 3) {
   throw lastError;
 }
 
-// SSE setup for frontend streaming
-const sseClients = [];
-function sendEvent(event) {
-  sseClients.forEach(client =>
-    client.write(`data: ${JSON.stringify(event)}\n\n`)
-  );
-}
-
-// Override console.log to send events
+// In-memory log buffer
+const logBuffer = [];
+// Helper to record logs
 const originalLog = console.log;
 console.log = (...args) => {
-  sendEvent({ type: 'log', message: args.join(' ') });
+  const msg = args.join(' ');
+  logBuffer.push(msg);
   originalLog(...args);
 };
 
@@ -175,17 +170,10 @@ app.use(cors({
 }));
 app.options('*', cors());
 
-// SSE endpoint
-app.get('/api/webinars/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-  sseClients.push(res);
-  req.on('close', () => {
-    const idx = sseClients.indexOf(res);
-    if (idx !== -1) sseClients.splice(idx, 1);
-  });
+
+// Endpoint for polling logs
+app.get('/api/webinars/logs', (req, res) => {
+  res.json({ logs: logBuffer });
 });
 
 app.get('/', (req, res) => res.send('✅ Server is running'));
