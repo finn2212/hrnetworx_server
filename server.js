@@ -1,7 +1,7 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
-const chromium = require('chrome-aws-lambda');
+const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 const { doLogin } = require('./login');
 const { getAttendeeList } = require('./attendeeList');
