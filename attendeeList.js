@@ -1,7 +1,7 @@
 // attendeeList.js
 async function getAttendeeList(page) {
     try {
-      // 1. Shadow-Host
+      // 1. Hol das Shadow-Host-Element
       const hostHandle = await page.$("#streamingPage_webinargeek");
       if (!hostHandle) {
         throw new Error("Shadow-Host #streamingPage_webinargeek nicht gefunden!");
@@ -17,16 +17,14 @@ async function getAttendeeList(page) {
       }
   
       // 4. Daten extrahieren
-      const attendees = await attendeeListHandle.$$eval("li", (items) => {
+      const allItems = await attendeeListHandle.$$eval("li", (items) => {
         return items.map((item) => {
           //-----------------------------------------
-          // (A) NAME
+          // (A) NAME (so wie vorher)
           //-----------------------------------------
-          // Versuche: Finde <div class="sc-bTIvZA ..."> => reiner Teilnehmername
-          let nameDiv = item.querySelector('div.sc-bTIvZA');
+          let nameDiv = item.querySelector("div.sc-bTIvZA");
           let name = nameDiv ? nameDiv.textContent.trim() : null;
   
-          // Fallback: Falls wir noch keinen Namen haben, probier aria-label
           if (!name) {
             const ariaLabel = item.getAttribute("aria-label")?.trim();
             if (ariaLabel) {
@@ -35,29 +33,31 @@ async function getAttendeeList(page) {
           }
   
           //-----------------------------------------
-          // (B) ONLINE-STATUS
+          // (B) ONLINE-STATUS (unverändert)
           //-----------------------------------------
           const onlineDiv = item.querySelector("div[data-online]");
-          const onlineStatus = onlineDiv ? onlineDiv.getAttribute("data-online") : null;
+          const onlineStatus = onlineDiv
+            ? onlineDiv.getAttribute("data-online")
+            : null;
   
           //-----------------------------------------
-          // (C) E-MAIL extrahieren
+          // (C) E-MAIL 
+          // Nur aus div.sc-iTOIXX.ihbVgp -> reiner Text "events@hrnetworx.de"
           //-----------------------------------------
           let email = null;
-          // Suche in allen div/span/p nach @
-          const possibleNodes = item.querySelectorAll("div, span, p, li, b, i");
-          for (const node of possibleNodes) {
-            const txt = node.textContent?.trim() || "";
-            // Regex: erstes Vorkommen einer E-Mail
-            const match = txt.match(/[\w.+-]+@[\w.-]+\.\w+/);
-            if (match) {
-              email = match[0];
-              break;
-            }
+          const emailDiv = item.querySelector("div.sc-iTOIXX.ihbVgp");
+          if (emailDiv) {
+            // Direkt den Text-Inhalt übernehmen
+            email = emailDiv.textContent.trim();
           }
   
           return { name, onlineStatus, email };
         });
+      });
+  
+      // 5. Leere Einträge (ohne name, email, status) rausfiltern
+      const attendees = allItems.filter((item) => {
+        return item.name || item.email || item.onlineStatus;
       });
   
       return attendees;
