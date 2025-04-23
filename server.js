@@ -1,5 +1,6 @@
 // server.js
 const express = require('express');
+const cors = require('cors');
 const puppeteer = require('puppeteer');
 const { doLogin } = require('./login');
 const { getAttendeeList } = require('./attendeeList');
@@ -121,6 +122,15 @@ async function stopLoggingProcess() {
 }
 
 const app = express();
+
+// CORS configuration
+app.use(cors({
+  origin: ['http://localhost:3000', 'https://hrnetworx-frontend.vercel.app'],
+  methods: ['GET','POST','OPTIONS'],
+  credentials: true
+}));
+// Enable preflight for all routes
+app.options('*', cors());
 
 app.get('/', (req, res) => {
   res.send('✅ Server is running');
