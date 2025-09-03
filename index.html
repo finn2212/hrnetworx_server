@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Recorder</title></head>
+<body style="font-family:sans-serif;padding:20px">
+  <h2>Webinar Recorder</h2>
+  <button id="start">▶ Start Logging</button>
+  <button id="stop">■ Stop Logging</button>
+  <script>
+    const { ipcRenderer } = require('electron')
+    document.getElementById('start').onclick = () => ipcRenderer.invoke('start-recording')
+    document.getElementById('stop').onclick  = () => ipcRenderer.invoke('stop-recording')
+  </script>
+</body>
+</html>
