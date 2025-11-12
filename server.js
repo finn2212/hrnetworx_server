@@ -215,7 +215,6 @@ async function startLoggingProcess() {
     await new Promise((r) => setTimeout(r, 5000));
     try {
       const attendees = await getAttendeeList(page);
-      console.log("[LOG] Current attendees:", attendees);
 
       const now = new Date().toISOString();
       const eventId = config.EVENT_ID || "default_event";
