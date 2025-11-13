@@ -16,7 +16,6 @@ const path = require("path");
 
 const { doLogin } = require("./login");
 const { getAttendeeList } = require("./attendeeList");
-const { diffAttendees } = require("./attendanceTracker");
 
 // Helper to retry puppeteer-core.launch on ETXTBSY errors
 async function safeLaunch(options, retries = 3) {
@@ -270,4 +269,56 @@ if (require.main === module) {
     console.error(err);
     process.exit(1);
   });
+}
+
+// Einfache diffAttendees Funktion (in server.js einfügen)
+let knownAttendees = new Set();
+
+function diffAttendees(currentAttendees, eventId, timestamp) {
+  const currentAttendeeIds = new Set();
+  const changes = [];
+
+  // Create unique IDs for current attendees
+  currentAttendees.forEach((attendee) => {
+    const attendeeId = `${attendee.name || "unknown"}-${
+      attendee.email || "no-email"
+    }-${attendee.dataIndex || "no-index"}`;
+    currentAttendeeIds.add(attendeeId);
+
+    // Check if this is a new attendee
+    if (!knownAttendees.has(attendeeId)) {
+      changes.push({
+        type: "join",
+        event_id: eventId,
+        attendee_id: attendeeId,
+        attendee_name: attendee.name || "Unnamed",
+        attendee_email: attendee.email,
+        join_time: timestamp,
+        raw_data: attendee,
+      });
+      console.log(`[JOIN] ${attendee.name} (${attendeeId})`);
+    }
+  });
+
+  // Check for left attendees
+  knownAttendees.forEach((previousId) => {
+    if (!currentAttendeeIds.has(previousId)) {
+      changes.push({
+        type: "leave",
+        event_id: eventId,
+        attendee_id: previousId,
+        leave_time: timestamp,
+      });
+      console.log(`[LEAVE] ${previousId}`);
+    }
+  });
+
+  // Update known attendees
+  knownAttendees = currentAttendeeIds;
+
+  console.log(`[DEBUG] currentList:`, Array.from(currentAttendeeIds));
+  console.log(`[DEBUG] knownAttendees:`, Array.from(knownAttendees));
+  console.log(`[LOG] Changes: ${changes.length}`);
+
+  return changes;
 }
