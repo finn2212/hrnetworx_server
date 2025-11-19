@@ -253,14 +253,19 @@ async function startLoggingProcess() {
   page = null;
   console.log("[LOG] Browser closed, logging stopped.");
 }
+function normalizeName(name) {
+  if (!name) return null;
 
-async function stopLoggingProcess() {
-  isLogging = false;
-  if (browser) {
-    await browser.close();
-    browser = null;
-    page = null;
-  }
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "") // Sonderzeichen entfernen
+    .replace(/\s+/g, " "); // Mehrfachspaces entfernen
+}
+
+function getStableId(attendee) {
+  const norm = normalizeName(attendee.name);
+  return norm ? `name:${norm}` : null;
 }
 
 // Run logging process directly when invoked as a script
@@ -274,51 +279,55 @@ if (require.main === module) {
 // Einfache diffAttendees Funktion (in server.js einfügen)
 let knownAttendees = new Set();
 
-function diffAttendees(currentAttendees, eventId, timestamp) {
-  const currentAttendeeIds = new Set();
+// NEW: Stabiler Anwesenheitszustand
+const stablePresent = new Set(); // Wer gilt als stabil anwesend
+const lastSeen = new Map(); // Letzte Sichtung in ms Timestamp
+const ABSENCE_THRESHOLD_MS = 5000; // 5 Sekunden Schwelle für echte Leavesfin
+
+function diffAttendees(currentAttendees, eventId, isoTimestamp) {
+  const now = Date.now();
   const changes = [];
 
-  // Create unique IDs for current attendees
-  currentAttendees.forEach((attendee) => {
-    const attendeeId = `${attendee.name || "unknown"}-${
-      attendee.email || "no-email"
-    }-${attendee.dataIndex || "no-index"}`;
-    currentAttendeeIds.add(attendeeId);
+  // Markiere alle, die aktuell sichtbar sind
+  for (const att of currentAttendees) {
+    const id = getStableId(att);
+    if (!id) continue; // skip unknowns
 
-    // Check if this is a new attendee
-    if (!knownAttendees.has(attendeeId)) {
+    lastSeen.set(id, now);
+
+    if (!stablePresent.has(id)) {
+      // echter neuer Join
+      stablePresent.add(id);
+
       changes.push({
         type: "join",
         event_id: eventId,
-        attendee_id: attendeeId,
-        attendee_name: attendee.name || "Unnamed",
-        attendee_email: attendee.email,
-        join_time: timestamp,
-        raw_data: attendee,
+        attendee_id: id,
+        attendee_name: att.name,
+        join_time: isoTimestamp,
       });
-      console.log(`[JOIN] ${attendee.name} (${attendeeId})`);
-    }
-  });
 
-  // Check for left attendees
-  knownAttendees.forEach((previousId) => {
-    if (!currentAttendeeIds.has(previousId)) {
+      console.log(`[JOIN] ${att.name} (${id})`);
+    }
+  }
+
+  // Check for people who disappeared (länger als 5 Sekunden)
+  for (const id of Array.from(stablePresent)) {
+    const last = lastSeen.get(id);
+    if (last && now - last > ABSENCE_THRESHOLD_MS) {
+      // echter Leave
+      stablePresent.delete(id);
+
       changes.push({
         type: "leave",
         event_id: eventId,
-        attendee_id: previousId,
-        leave_time: timestamp,
+        attendee_id: id,
+        leave_time: isoTimestamp,
       });
-      console.log(`[LEAVE] ${previousId}`);
+
+      console.log(`[LEAVE] ${id}`);
     }
-  });
-
-  // Update known attendees
-  knownAttendees = currentAttendeeIds;
-
-  console.log(`[DEBUG] currentList:`, Array.from(currentAttendeeIds));
-  console.log(`[DEBUG] knownAttendees:`, Array.from(knownAttendees));
-  console.log(`[LOG] Changes: ${changes.length}`);
+  }
 
   return changes;
 }
